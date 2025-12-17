@@ -87,7 +87,7 @@ function parseData(data: any) {
   return { keysMs, podNames, podCpuSeries, podMemSeries, tx_per_sec, eventsPerTime };
 }
 
-function makeTracesForPods(podNames: string[], seriesMap: Record<string, number[]>, keysX: number[], keysText: string[]) {
+function makeTracesForPods(podNames: string[], seriesMap: Record<string, number[]>, keysX: number[], keysText: string[], barWidth: number) {
   const traces: any[] = [];
   for (const pod of podNames) {
     traces.push({
@@ -96,6 +96,7 @@ function makeTracesForPods(podNames: string[], seriesMap: Record<string, number[
       text: keysText, // formatted elapsed string per point
       name: pod,
       type: 'bar',
+      width: barWidth,
       marker: { opacity: 0.8 },
       // show pod name and formatted elapsed time in tooltip
       hovertemplate: '%{fullData.name}<br>Elapsed: %{text}<br>%{y} <extra></extra>'
@@ -174,6 +175,19 @@ function createPlots(parsed: any, filePath: string, divCpu: string, divMem: stri
   const elapsedSec = keysMs.map(ms => (ms - startMs) / 1000);
   const elapsedText = elapsedSec.map(s => formatDuration(s));
 
+  // choose bar width as most of the available gap between points (95%) to reduce visual spacing
+  let barWidth = 0.95;
+  if (elapsedSec.length > 1) {
+    const diffs: number[] = [];
+    for (let i = 1; i < elapsedSec.length; i++) diffs.push(elapsedSec[i] - elapsedSec[i - 1]);
+    const positive = diffs.filter(d => isFinite(d) && d > 0);
+    if (positive.length) {
+      const minDiff = Math.min(...positive);
+      // use most of the gap but leave a tiny space between bars (95% of gap)
+      barWidth = Math.max(0.001, minDiff * 0.95);
+    }
+  }
+
   // compute tick values and labels for the elapsed axis (6 ticks)
   const maxSec = elapsedSec.length ? Math.max(...elapsedSec) : 0;
   const numTicks = 6;
@@ -186,7 +200,7 @@ function createPlots(parsed: any, filePath: string, divCpu: string, divMem: stri
   }
 
   // CPU chart
-  const cpuTraces = makeTracesForPods(podNames, podCpuSeries, elapsedSec, elapsedText);
+  const cpuTraces = makeTracesForPods(podNames, podCpuSeries, elapsedSec, elapsedText, barWidth);
   // compute total CPU per timestamp so we can place event markers above the stacked bars
   const totalCpu: number[] = elapsedSec.map((_, i) => podNames.reduce((acc, p) => acc + (podCpuSeries[p][i] || 0), 0));
   const maxTotalCpu = totalCpu.length ? Math.max(...totalCpu) : 0;
@@ -224,6 +238,9 @@ function createPlots(parsed: any, filePath: string, divCpu: string, divMem: stri
   const cpuLayout = {
     title: 'CPU Metrics - ' + filePath.split('/').pop(),
     barmode: 'stack',
+    // reduce spacing between bars
+    bargap: 0.01,
+    bargroupgap: 0,
     hovermode: 'closest',
     legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: -0.2 },
     xaxis: {
@@ -243,7 +260,7 @@ function createPlots(parsed: any, filePath: string, divCpu: string, divMem: stri
   attachHoverHandlers(divCpu);
 
   // Memory chart
-  const memTraces = makeTracesForPods(podNames, podMemSeries, elapsedSec, elapsedText);
+  const memTraces = makeTracesForPods(podNames, podMemSeries, elapsedSec, elapsedText, barWidth);
   // compute total Memory per timestamp for event placement
   const totalMem: number[] = elapsedSec.map((_, i) => podNames.reduce((acc, p) => acc + (podMemSeries[p][i] || 0), 0));
   const maxTotalMem = totalMem.length ? Math.max(...totalMem) : 0;
@@ -277,6 +294,9 @@ function createPlots(parsed: any, filePath: string, divCpu: string, divMem: stri
   const memLayout = {
     title: 'Memory Metrics - ' + filePath.split('/').pop(),
     barmode: 'stack',
+    // reduce spacing between bars
+    bargap: 0.01,
+    bargroupgap: 0,
     hovermode: 'closest',
     legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: -0.2 },
     xaxis: {
