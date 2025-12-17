@@ -80,20 +80,36 @@ function parseData(data: any) {
   return { keysMs, podNames, podCpuSeries, podMemSeries, tx_per_sec };
 }
 
-function makeTracesForPods(podNames: string[], seriesMap: Record<string, number[]>, keysMs: number[]) {
+function makeTracesForPods(podNames: string[], seriesMap: Record<string, number[]>, keysX: number[], keysText: string[]) {
   const traces: any[] = [];
   for (const pod of podNames) {
     traces.push({
-      x: keysMs,
+      x: keysX,
       y: seriesMap[pod],
+      text: keysText, // formatted elapsed string per point
       name: pod,
       type: 'bar',
       marker: { opacity: 0.8 },
-      // show only this trace in the hover tooltip
-      hovertemplate: '%{trace.name}<br>%{y} <extra></extra>'
+      // show pod name and formatted elapsed time in tooltip
+      hovertemplate: '%{trace.name}<br>Elapsed: %{text}<br>%{y} <extra></extra>'
     });
   }
   return traces;
+}
+
+// helper to format seconds into human-friendly elapsed string
+function formatDuration(seconds: number) {
+  if (!isFinite(seconds)) return '';
+  const s = Math.round(seconds);
+  if (s < 60) return s + 's';
+  const hrs = Math.floor(s / 3600);
+  const mins = Math.floor((s % 3600) / 60);
+  const rem = s % 60;
+  if (hrs > 0) {
+    return hrs + 'h' + (mins > 0 ? ' ' + mins + 'm' : '');
+  }
+  // minutes >=1 and <1 hour
+  return mins + 'm' + (rem > 0 ? ' ' + rem + 's' : '');
 }
 
 function attachHoverHandlers(divId: string) {
@@ -145,17 +161,35 @@ async function render(filePath: string, divCpu: string, divMem: string) {
 function createPlots(parsed: any, filePath: string, divCpu: string, divMem: string) {
   const { keysMs, podNames, podCpuSeries, podMemSeries, tx_per_sec } = parsed;
 
+  // compute elapsed seconds relative to the first timestamp
+  const startMs = keysMs.length ? keysMs[0] : 0;
+  const elapsedSec = keysMs.map(ms => (ms - startMs) / 1000);
+  const elapsedText = elapsedSec.map(s => formatDuration(s));
+
+  // compute tick values and labels for the elapsed axis (6 ticks)
+  const maxSec = elapsedSec.length ? Math.max(...elapsedSec) : 0;
+  const numTicks = 6;
+  const tickVals: number[] = [];
+  const tickText: string[] = [];
+  for (let i = 0; i <= numTicks; i++) {
+    const v = (maxSec * i) / numTicks;
+    tickVals.push(Math.round(v));
+    tickText.push(formatDuration(Math.round(v)));
+  }
+
   // CPU chart
-  const cpuTraces = makeTracesForPods(podNames, podCpuSeries, keysMs);
+  const cpuTraces = makeTracesForPods(podNames, podCpuSeries, elapsedSec, elapsedText);
   const cpuTpsTrace = {
-    x: keysMs,
+    x: elapsedSec,
     y: tx_per_sec,
+    text: elapsedText,
     name: 'Transactions/sec',
     type: 'scatter',
     mode: 'lines+markers',
     marker: { color: 'red' },
     yaxis: 'y2',
-    hovertemplate: '%{trace.name}<br>%{y:.2f} <extra></extra>'
+    // show formatted elapsed time in tooltip
+    hovertemplate: '%{trace.name}<br>Elapsed: %{text}<br>%{y:.2f} <extra></extra>'
   };
   const cpuData = cpuTraces.concat([cpuTpsTrace]);
   const cpuLayout = {
@@ -163,6 +197,14 @@ function createPlots(parsed: any, filePath: string, divCpu: string, divMem: stri
     barmode: 'stack',
     hovermode: 'closest',
     legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: -0.2 },
+    xaxis: {
+      title: 'Elapsed',
+      type: 'linear',
+      tickvals: tickVals,
+      ticktext: tickText,
+      tickangle: -45,
+      automargin: true
+    },
     yaxis: { title: 'CPU (millicores)' },
     yaxis2: { title: 'Transactions/sec', overlaying: 'y', side: 'right' },
     margin: { t: 50, b: 120 }
@@ -172,16 +214,17 @@ function createPlots(parsed: any, filePath: string, divCpu: string, divMem: stri
   attachHoverHandlers(divCpu);
 
   // Memory chart
-  const memTraces = makeTracesForPods(podNames, podMemSeries, keysMs);
+  const memTraces = makeTracesForPods(podNames, podMemSeries, elapsedSec, elapsedText);
   const memTpsTrace = {
-    x: keysMs,
+    x: elapsedSec,
     y: tx_per_sec,
+    text: elapsedText,
     name: 'Transactions/sec',
     type: 'scatter',
     mode: 'lines+markers',
     marker: { color: 'red' },
     yaxis: 'y2',
-    hovertemplate: '%{trace.name}<br>%{y:.2f} <extra></extra>'
+    hovertemplate: '%{trace.name}<br>Elapsed: %{text}<br>%{y:.2f} <extra></extra>'
   };
   const memData = memTraces.concat([memTpsTrace]);
   const memLayout = {
@@ -189,6 +232,14 @@ function createPlots(parsed: any, filePath: string, divCpu: string, divMem: stri
     barmode: 'stack',
     hovermode: 'closest',
     legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: -0.2 },
+    xaxis: {
+      title: 'Elapsed',
+      type: 'linear',
+      tickvals: tickVals,
+      ticktext: tickText,
+      tickangle: -45,
+      automargin: true
+    },
     yaxis: { title: 'Memory (MiB)' },
     yaxis2: { title: 'Transactions/sec', overlaying: 'y', side: 'right' },
     margin: { t: 50, b: 120 }
