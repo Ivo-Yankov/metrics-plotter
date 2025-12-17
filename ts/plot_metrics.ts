@@ -14,6 +14,13 @@ function parseData(data: any) {
 
   const transaction_counts = keysMs.map(k => data[String(k)].transactionCount || 0);
 
+  // collect events per timestamp (join multiple events into a single string or empty)
+  const eventsPerTime: string[] = keysMs.map(k => {
+    const ev = (data[String(k)] && data[String(k)].events) || [];
+    if (!Array.isArray(ev)) return '';
+    return ev.length ? ev.join('; ') : '';
+  });
+
   // Collect pod names and per-time pod metrics
   const podNamesSet = new Set<string>();
   const podMetricsByTime: Array<Record<string, { cpuInMillicores: number; memoryInMebibytes: number }>> = [];
@@ -77,7 +84,7 @@ function parseData(data: any) {
     tx_per_sec.push(deltaMs > 0 ? deltaTx / (deltaMs / 1000.0) : 0);
   }
 
-  return { keysMs, podNames, podCpuSeries, podMemSeries, tx_per_sec };
+  return { keysMs, podNames, podCpuSeries, podMemSeries, tx_per_sec, eventsPerTime };
 }
 
 function makeTracesForPods(podNames: string[], seriesMap: Record<string, number[]>, keysX: number[], keysText: string[]) {
@@ -91,7 +98,7 @@ function makeTracesForPods(podNames: string[], seriesMap: Record<string, number[
       type: 'bar',
       marker: { opacity: 0.8 },
       // show pod name and formatted elapsed time in tooltip
-      hovertemplate: '%{trace.name}<br>Elapsed: %{text}<br>%{y} <extra></extra>'
+      hovertemplate: '%{fullData.name}<br>Elapsed: %{text}<br>%{y} <extra></extra>'
     });
   }
   return traces;
@@ -160,6 +167,7 @@ async function render(filePath: string, divCpu: string, divMem: string) {
 
 function createPlots(parsed: any, filePath: string, divCpu: string, divMem: string) {
   const { keysMs, podNames, podCpuSeries, podMemSeries, tx_per_sec } = parsed;
+  const eventsPerTime: string[] = parsed.eventsPerTime || [];
 
   // compute elapsed seconds relative to the first timestamp
   const startMs = keysMs.length ? keysMs[0] : 0;
@@ -179,6 +187,12 @@ function createPlots(parsed: any, filePath: string, divCpu: string, divMem: stri
 
   // CPU chart
   const cpuTraces = makeTracesForPods(podNames, podCpuSeries, elapsedSec, elapsedText);
+  // compute total CPU per timestamp so we can place event markers above the stacked bars
+  const totalCpu: number[] = elapsedSec.map((_, i) => podNames.reduce((acc, p) => acc + (podCpuSeries[p][i] || 0), 0));
+  const maxTotalCpu = totalCpu.length ? Math.max(...totalCpu) : 0;
+  // place event markers in paper coordinates so they stay visually at the bottom of the chart
+  // paper y is 0..1 where 0 is bottom of plotting area; use a small offset (0.03)
+  const cpuEventY = totalCpu.map((_, i) => eventsPerTime[i] ? 0.03 : NaN);
   const cpuTpsTrace = {
     x: elapsedSec,
     y: tx_per_sec,
@@ -189,9 +203,24 @@ function createPlots(parsed: any, filePath: string, divCpu: string, divMem: stri
     marker: { color: 'red' },
     yaxis: 'y2',
     // show formatted elapsed time in tooltip
-    hovertemplate: '%{trace.name}<br>Elapsed: %{text}<br>%{y:.2f} <extra></extra>'
+    hovertemplate: '%{fullData.name}<br>Elapsed: %{text}<br>%{y:.2f} <extra></extra>'
+  };
+  const cpuEventsTrace = {
+    x: elapsedSec,
+    y: cpuEventY,
+    text: eventsPerTime,
+    customdata: elapsedText,
+    name: 'Events',
+    type: 'scatter',
+    mode: 'markers',
+    marker: { color: 'green', symbol: 'circle', size: 12, line: { color: 'black', width: 1 } },
+    hovertemplate: 'Event: %{text}<br>Elapsed: %{customdata}<extra></extra>',
+    // use paper coordinates for vertical placement so y is fraction of plotting area
+    yref: 'paper'
   };
   const cpuData = cpuTraces.concat([cpuTpsTrace]);
+  // add events trace after TPS so it's visible on top
+  cpuData.push(cpuEventsTrace);
   const cpuLayout = {
     title: 'CPU Metrics - ' + filePath.split('/').pop(),
     barmode: 'stack',
@@ -215,6 +244,11 @@ function createPlots(parsed: any, filePath: string, divCpu: string, divMem: stri
 
   // Memory chart
   const memTraces = makeTracesForPods(podNames, podMemSeries, elapsedSec, elapsedText);
+  // compute total Memory per timestamp for event placement
+  const totalMem: number[] = elapsedSec.map((_, i) => podNames.reduce((acc, p) => acc + (podMemSeries[p][i] || 0), 0));
+  const maxTotalMem = totalMem.length ? Math.max(...totalMem) : 0;
+  // place memory event markers in paper coordinates at the bottom (same fraction)
+  const memEventY = totalMem.map((_, i) => eventsPerTime[i] ? 0.03 : NaN);
   const memTpsTrace = {
     x: elapsedSec,
     y: tx_per_sec,
@@ -224,9 +258,22 @@ function createPlots(parsed: any, filePath: string, divCpu: string, divMem: stri
     mode: 'lines+markers',
     marker: { color: 'red' },
     yaxis: 'y2',
-    hovertemplate: '%{trace.name}<br>Elapsed: %{text}<br>%{y:.2f} <extra></extra>'
+    hovertemplate: '%{fullData.name}<br>Elapsed: %{text}<br>%{y:.2f} <extra></extra>'
+  };
+  const memEventsTrace = {
+    x: elapsedSec,
+    y: memEventY,
+    text: eventsPerTime,
+    customdata: elapsedText,
+    name: 'Events',
+    type: 'scatter',
+    mode: 'markers',
+    marker: { color: 'green', symbol: 'circle', size: 12, line: { color: 'black', width: 1 } },
+    hovertemplate: 'Event: %{text}<br>Elapsed: %{customdata}<extra></extra>',
+    yref: 'paper'
   };
   const memData = memTraces.concat([memTpsTrace]);
+  memData.push(memEventsTrace);
   const memLayout = {
     title: 'Memory Metrics - ' + filePath.split('/').pop(),
     barmode: 'stack',
@@ -261,7 +308,7 @@ function renderFromObject(obj: any, divCpu: string, divMem: string) {
 // If loaded directly, auto-run with example data
 if (typeof window !== 'undefined') {
   // use absolute path so fetching works from /ts/index.html
-  const defaultFile = window.location.search ? (new URLSearchParams(window.location.search).get('file') || '/data/example.json') : '/data/example.json';
+  const defaultFile = window.location.search ? (new URLSearchParams(window.location.search).get('file') || '/data/test-events.json') : '/data/test-events.json';
   // delay to allow Plotly to be loaded via CDN
   window.addEventListener('load', () => {
     try {
