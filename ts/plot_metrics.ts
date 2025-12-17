@@ -90,21 +90,38 @@ function parseData(data: any) {
 function makeTracesForPods(podNames: string[], seriesMap: Record<string, number[]>, keysX: number[], keysText: string[], stackGroup: string) {
   // produce stacked filled-area (scatter) traces using Plotly stackgroup
   const traces: any[] = [];
-  for (const pod of podNames) {
+
+  // palette and helper
+  const palette = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'];
+  function hexToRgba(hex: string, alpha: number) {
+    const h = (hex || '#000000').replace('#', '');
+    const bigint = parseInt(h, 16) || 0;
+    const r = (bigint >> 16) & 255;
+    const g = (bigint >> 8) & 255;
+    const b = bigint & 255;
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+
+  for (let i = 0; i < podNames.length; i++) {
+    const pod = podNames[i];
+    const color = palette[i % palette.length];
     traces.push({
       x: keysX,
       y: seriesMap[pod],
-      text: keysText, // formatted elapsed string per point
+      text: keysText,
       name: pod,
       type: 'scatter',
-      mode: 'none',
-      stackgroup: stackGroup, // stack areas per chart (cpu vs mem)
+      // include a lightweight line so hover works
+      mode: 'lines',
+      stackgroup: stackGroup,
       fill: 'tonexty',
-      // ensure hover works across the filled area (not just on the line)
-      hoveron: 'fills',
-      opacity: 0.8,
-      // start without an outline; we'll add a visible stroke on hover
-      line: { color: '#000', width: 0 },
+      hoveron: 'fills+points',
+      // store base fillcolor with alpha 0.6 and save base color for hover handler
+      fillcolor: hexToRgba(color, 0.6),
+      opacity: 0.85,
+      line: { color: color, width: 1 },
+      _baseColor: color,
+      _baseFillAlpha: 0.6,
       hovertemplate: '%{fullData.name}<br>Elapsed: %{text}<br>%{y} <extra></extra>'
     });
   }
@@ -130,24 +147,46 @@ function attachHoverHandlers(divId: string) {
   const gd = document.getElementById(divId) as any;
   if (!gd) return;
 
+  // helper to convert hex to rgba
+  function hexToRgba(hex: string, alpha: number) {
+    const h = (hex || '#000000').replace('#', '');
+    const bigint = parseInt(h, 16) || 0;
+    const r = (bigint >> 16) & 255;
+    const g = (bigint >> 8) & 255;
+    const b = bigint & 255;
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+
   let lastHighlighted: number | null = null;
 
   gd.on('plotly_hover', (eventData: any) => {
     if (!eventData || !eventData.points || !eventData.points.length) return;
     const pt = eventData.points[0];
     const traceIndex = pt.curveNumber;
-
     const trace = gd.data[traceIndex];
     if (!trace) return;
 
-    // If it's a stacked-area trace (scatter with stackgroup), increase opacity and add a stroke
+    // highlight full filled area for stacked-area traces
     if (trace.type === 'scatter' && trace.stackgroup) {
-      Plotly.restyle(gd, { opacity: 1.0, 'line.width': 2, 'line.color': '#000' }, [traceIndex]);
+      const allStackIndices: number[] = [];
+      for (let i = 0; i < gd.data.length; i++) {
+        const t = gd.data[i];
+        if (t && t.type === 'scatter' && t.stackgroup) allStackIndices.push(i);
+      }
+      const dimIndices = allStackIndices.filter(i => i !== traceIndex);
+
+      // hovered: set fill alpha to 1.0 (keep same RGB)
+      const baseColor = trace._baseColor || (trace.line && trace.line.color) || '#1f77b4';
+      Plotly.restyle(gd, { fillcolor: hexToRgba(baseColor, 1.0), opacity: 0.9, 'line.width': 2 }, [traceIndex]);
+
+      // dim others by lowering opacity (preserve their fillcolor RGB)
+      if (dimIndices.length) Plotly.restyle(gd, { opacity: 0.25 }, dimIndices);
+
       lastHighlighted = traceIndex;
       return;
     }
 
-    // If it's a TPS scatter (lines+markers), increase line width
+    // fallback: emphasize non-stacked scatter lines/markers
     if (trace.type === 'scatter' && (!trace.stackgroup)) {
       Plotly.restyle(gd, { 'line.width': 4 }, [traceIndex]);
       lastHighlighted = traceIndex;
@@ -156,24 +195,25 @@ function attachHoverHandlers(divId: string) {
   });
 
   gd.on('plotly_unhover', (_eventData: any) => {
-    // reset styles for all traces
     if (!gd || !gd.data) return;
+    const stackIndices: number[] = [];
     for (let i = 0; i < gd.data.length; i++) {
       const t = gd.data[i];
       if (!t) continue;
-      if (t.type === 'bar') {
-        Plotly.restyle(gd, { 'marker.opacity': 0.8 }, [i]);
-      } else if (t.type === 'scatter') {
-        // stacked area traces
-        if (t.stackgroup) {
-          // restore area opacity and remove outline
-          Plotly.restyle(gd, { opacity: 0.8, 'line.width': 0 }, [i]);
-        } else {
-          // TPS line
-          Plotly.restyle(gd, { 'line.width': 2 }, [i]);
-        }
+      if (t.type === 'scatter') {
+        if (t.stackgroup) stackIndices.push(i);
+        else Plotly.restyle(gd, { 'line.width': 2 }, [i]);
       }
     }
+
+    // restore original fill alpha and opacity for stacked traces
+    for (const idx of stackIndices) {
+      const t = gd.data[idx];
+      const baseColor = (t && (t._baseColor || (t.line && t.line.color))) || '#1f77b4';
+      const baseAlpha = (t && (typeof t._baseFillAlpha === 'number' ? t._baseFillAlpha : 0.6));
+      Plotly.restyle(gd, { fillcolor: hexToRgba(baseColor, baseAlpha), opacity: 0.85, 'line.width': 1 }, [idx]);
+    }
+
     lastHighlighted = null;
   });
 }
