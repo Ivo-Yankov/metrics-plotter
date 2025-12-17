@@ -1,0 +1,16 @@
+{
+  "name": "metrics-plotter-ts",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "esbuild ts/plot_metrics.ts --bundle --outfile=static/bundle.js --platform=browser --minify",
+    "watch": "esbuild ts/plot_metrics.ts --bundle --outfile=static/bundle.js --platform=browser --servedir=. --watch",
+    "start": "node -e \"require('child_process').execSync('npx http-server -c-1 -p 8000', {stdio:'inherit'})\""
+  },
+  "devDependencies": {
+    "esbuild": "^0.18.0",
+    "typescript": "^5.0.0",
+    "http-server": "^14.1.1"
+  }
+}
+
