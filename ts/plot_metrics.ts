@@ -87,7 +87,8 @@ function parseData(data: any) {
   return { keysMs, podNames, podCpuSeries, podMemSeries, tx_per_sec, eventsPerTime };
 }
 
-function makeTracesForPods(podNames: string[], seriesMap: Record<string, number[]>, keysX: number[], keysText: string[], barWidth: number) {
+function makeTracesForPods(podNames: string[], seriesMap: Record<string, number[]>, keysX: number[], keysText: string[], stackGroup: string) {
+  // produce stacked filled-area (scatter) traces using Plotly stackgroup
   const traces: any[] = [];
   for (const pod of podNames) {
     traces.push({
@@ -95,10 +96,15 @@ function makeTracesForPods(podNames: string[], seriesMap: Record<string, number[
       y: seriesMap[pod],
       text: keysText, // formatted elapsed string per point
       name: pod,
-      type: 'bar',
-      width: barWidth,
-      marker: { opacity: 0.8 },
-      // show pod name and formatted elapsed time in tooltip
+      type: 'scatter',
+      mode: 'none',
+      stackgroup: stackGroup, // stack areas per chart (cpu vs mem)
+      fill: 'tonexty',
+      // ensure hover works across the filled area (not just on the line)
+      hoveron: 'fills',
+      opacity: 0.8,
+      // start without an outline; we'll add a visible stroke on hover
+      line: { color: '#000', width: 0 },
       hovertemplate: '%{fullData.name}<br>Elapsed: %{text}<br>%{y} <extra></extra>'
     });
   }
@@ -131,30 +137,42 @@ function attachHoverHandlers(divId: string) {
     const pt = eventData.points[0];
     const traceIndex = pt.curveNumber;
 
-    // find all bar traces (type 'bar') and their indices
-    const barTraceIndices = gd.data.map((t: any, idx: number) => t.type === 'bar' ? idx : -1).filter((i: number) => i >= 0);
+    const trace = gd.data[traceIndex];
+    if (!trace) return;
 
-    if (barTraceIndices.includes(traceIndex)) {
-      // Highlight only the hovered bar trace: make it more opaque
-      Plotly.restyle(gd, { 'marker.opacity': 0.95 }, [traceIndex]);
+    // If it's a stacked-area trace (scatter with stackgroup), increase opacity and add a stroke
+    if (trace.type === 'scatter' && trace.stackgroup) {
+      Plotly.restyle(gd, { opacity: 1.0, 'line.width': 2, 'line.color': '#000' }, [traceIndex]);
       lastHighlighted = traceIndex;
-    } else {
-      // if the hovered trace is the TPS line (scatter), highlight it by increasing width
-      const t = gd.data[traceIndex];
-      if (t && t.type === 'scatter') {
-        Plotly.restyle(gd, { 'line.width': 4 }, [traceIndex]);
-        lastHighlighted = traceIndex;
-      }
+      return;
+    }
+
+    // If it's a TPS scatter (lines+markers), increase line width
+    if (trace.type === 'scatter' && (!trace.stackgroup)) {
+      Plotly.restyle(gd, { 'line.width': 4 }, [traceIndex]);
+      lastHighlighted = traceIndex;
+      return;
     }
   });
 
   gd.on('plotly_unhover', (_eventData: any) => {
-    // reset bar opacities and scatter widths
+    // reset styles for all traces
     if (!gd || !gd.data) return;
     for (let i = 0; i < gd.data.length; i++) {
       const t = gd.data[i];
-      if (t.type === 'bar') Plotly.restyle(gd, { 'marker.opacity': 0.8 }, [i]);
-      if (t.type === 'scatter') Plotly.restyle(gd, { 'line.width': 2 }, [i]);
+      if (!t) continue;
+      if (t.type === 'bar') {
+        Plotly.restyle(gd, { 'marker.opacity': 0.8 }, [i]);
+      } else if (t.type === 'scatter') {
+        // stacked area traces
+        if (t.stackgroup) {
+          // restore area opacity and remove outline
+          Plotly.restyle(gd, { opacity: 0.8, 'line.width': 0 }, [i]);
+        } else {
+          // TPS line
+          Plotly.restyle(gd, { 'line.width': 2 }, [i]);
+        }
+      }
     }
     lastHighlighted = null;
   });
@@ -175,19 +193,6 @@ function createPlots(parsed: any, filePath: string, divCpu: string, divMem: stri
   const elapsedSec = keysMs.map(ms => (ms - startMs) / 1000);
   const elapsedText = elapsedSec.map(s => formatDuration(s));
 
-  // choose bar width as most of the available gap between points (95%) to reduce visual spacing
-  let barWidth = 0.95;
-  if (elapsedSec.length > 1) {
-    const diffs: number[] = [];
-    for (let i = 1; i < elapsedSec.length; i++) diffs.push(elapsedSec[i] - elapsedSec[i - 1]);
-    const positive = diffs.filter(d => isFinite(d) && d > 0);
-    if (positive.length) {
-      const minDiff = Math.min(...positive);
-      // use most of the gap but leave a tiny space between bars (95% of gap)
-      barWidth = Math.max(0.001, minDiff * 0.95);
-    }
-  }
-
   // compute tick values and labels for the elapsed axis (6 ticks)
   const maxSec = elapsedSec.length ? Math.max(...elapsedSec) : 0;
   const numTicks = 6;
@@ -199,11 +204,12 @@ function createPlots(parsed: any, filePath: string, divCpu: string, divMem: stri
     tickText.push(formatDuration(Math.round(v)));
   }
 
-  // CPU chart
-  const cpuTraces = makeTracesForPods(podNames, podCpuSeries, elapsedSec, elapsedText, barWidth);
+  // no bar width needed for filled-area charts
+
+  // CPU chart (stacked filled area)
+  const cpuTraces = makeTracesForPods(podNames, podCpuSeries, elapsedSec, elapsedText, 'cpu');
   // compute total CPU per timestamp so we can place event markers above the stacked bars
   const totalCpu: number[] = elapsedSec.map((_, i) => podNames.reduce((acc, p) => acc + (podCpuSeries[p][i] || 0), 0));
-  const maxTotalCpu = totalCpu.length ? Math.max(...totalCpu) : 0;
   // place event markers in paper coordinates so they stay visually at the bottom of the chart
   // paper y is 0..1 where 0 is bottom of plotting area; use a small offset (0.03)
   const cpuEventY = totalCpu.map((_, i) => eventsPerTime[i] ? 0.03 : NaN);
@@ -230,17 +236,15 @@ function createPlots(parsed: any, filePath: string, divCpu: string, divMem: stri
     marker: { color: 'green', symbol: 'circle', size: 12, line: { color: 'black', width: 1 } },
     hovertemplate: 'Event: %{text}<br>Elapsed: %{customdata}<extra></extra>',
     // use paper coordinates for vertical placement so y is fraction of plotting area
-    yref: 'paper'
+    yref: 'paper',
+    showlegend: false
   };
   const cpuData = cpuTraces.concat([cpuTpsTrace]);
   // add events trace after TPS so it's visible on top
   cpuData.push(cpuEventsTrace);
   const cpuLayout = {
     title: 'CPU Metrics - ' + filePath.split('/').pop(),
-    barmode: 'stack',
-    // reduce spacing between bars
-    bargap: 0.01,
-    bargroupgap: 0,
+    // stacked area, no barmode
     hovermode: 'closest',
     legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: -0.2 },
     xaxis: {
@@ -259,11 +263,10 @@ function createPlots(parsed: any, filePath: string, divCpu: string, divMem: stri
   Plotly.newPlot(divCpu, cpuData, cpuLayout, {responsive: true});
   attachHoverHandlers(divCpu);
 
-  // Memory chart
-  const memTraces = makeTracesForPods(podNames, podMemSeries, elapsedSec, elapsedText, barWidth);
+  // Memory chart (stacked filled area)
+  const memTraces = makeTracesForPods(podNames, podMemSeries, elapsedSec, elapsedText, 'mem');
   // compute total Memory per timestamp for event placement
   const totalMem: number[] = elapsedSec.map((_, i) => podNames.reduce((acc, p) => acc + (podMemSeries[p][i] || 0), 0));
-  const maxTotalMem = totalMem.length ? Math.max(...totalMem) : 0;
   // place memory event markers in paper coordinates at the bottom (same fraction)
   const memEventY = totalMem.map((_, i) => eventsPerTime[i] ? 0.03 : NaN);
   const memTpsTrace = {
@@ -287,16 +290,14 @@ function createPlots(parsed: any, filePath: string, divCpu: string, divMem: stri
     mode: 'markers',
     marker: { color: 'green', symbol: 'circle', size: 12, line: { color: 'black', width: 1 } },
     hovertemplate: 'Event: %{text}<br>Elapsed: %{customdata}<extra></extra>',
-    yref: 'paper'
+    yref: 'paper',
+    showlegend: false
   };
   const memData = memTraces.concat([memTpsTrace]);
   memData.push(memEventsTrace);
   const memLayout = {
     title: 'Memory Metrics - ' + filePath.split('/').pop(),
-    barmode: 'stack',
-    // reduce spacing between bars
-    bargap: 0.01,
-    bargroupgap: 0,
+    // stacked area, no barmode
     hovermode: 'closest',
     legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: -0.2 },
     xaxis: {
