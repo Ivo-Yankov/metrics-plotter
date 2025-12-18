@@ -252,7 +252,6 @@ function createPlots(parsed: any, filePath: string, divCpu: string, divMem: stri
   const totalCpu: number[] = elapsedSec.map((_, i) => podNames.reduce((acc, p) => acc + (podCpuSeries[p][i] || 0), 0));
   // place event markers in paper coordinates so they stay visually at the bottom of the chart
   // paper y is 0..1 where 0 is bottom of plotting area; use a small offset (0.03)
-  const cpuEventY = totalCpu.map((_, i) => eventsPerTime[i] ? 0.03 : NaN);
   const cpuTpsTrace = {
     x: elapsedSec,
     y: tx_per_sec,
@@ -267,25 +266,42 @@ function createPlots(parsed: any, filePath: string, divCpu: string, divMem: stri
   };
   const cpuEventsTrace = {
     x: elapsedSec,
-    y: cpuEventY,
+    y: totalCpu.map((_, i) => eventsPerTime[i] ? 0.03 : NaN),
     text: eventsPerTime,
     customdata: elapsedText,
     name: 'Events',
     type: 'scatter',
     mode: 'markers',
-    marker: { color: 'green', symbol: 'circle', size: 12, line: { color: 'black', width: 1 } },
+    marker: { color: 'green', symbol: 'circle', size: 10, line: { color: 'black', width: 1 } },
     hovertemplate: 'Event: %{text}<br>Elapsed: %{customdata}<extra></extra>',
     // use paper coordinates for vertical placement so y is fraction of plotting area
     yref: 'paper',
     showlegend: false
   };
   const cpuData = cpuTraces.concat([cpuTpsTrace]);
-  // add events trace after TPS so it's visible on top
+
+  // add event markers after TPS so they render on top of areas/lines
   cpuData.push(cpuEventsTrace);
+  const cpuShapes: any[] = [];
+  for (let i = 0; i < elapsedSec.length; i++) {
+    if (!eventsPerTime[i]) continue;
+    cpuShapes.push({
+      type: 'line',
+      x0: elapsedSec[i],
+      x1: elapsedSec[i],
+      y0: 0,
+      y1: 1,
+      xref: 'x',
+      yref: 'paper',
+      line: { color: 'green', width: 3, dash: 'dot' },
+      opacity: 0.9
+    });
+  }
   const cpuLayout = {
     title: 'CPU Metrics - ' + filePath.split('/').pop(),
     // stacked area, no barmode
     hovermode: 'closest',
+    shapes: cpuShapes,
     legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: -0.2 },
     xaxis: {
       title: 'Elapsed',
@@ -308,7 +324,6 @@ function createPlots(parsed: any, filePath: string, divCpu: string, divMem: stri
   // compute total Memory per timestamp for event placement
   const totalMem: number[] = elapsedSec.map((_, i) => podNames.reduce((acc, p) => acc + (podMemSeries[p][i] || 0), 0));
   // place memory event markers in paper coordinates at the bottom (same fraction)
-  const memEventY = totalMem.map((_, i) => eventsPerTime[i] ? 0.03 : NaN);
   const memTpsTrace = {
     x: elapsedSec,
     y: tx_per_sec,
@@ -320,25 +335,43 @@ function createPlots(parsed: any, filePath: string, divCpu: string, divMem: stri
     yaxis: 'y2',
     hovertemplate: '%{fullData.name}<br>Elapsed: %{text}<br>%{y:.2f} <extra></extra>'
   };
+  // restore memory event markers as circles as well
   const memEventsTrace = {
     x: elapsedSec,
-    y: memEventY,
+    y: totalMem.map((_, i) => eventsPerTime[i] ? 0.03 : NaN),
     text: eventsPerTime,
     customdata: elapsedText,
     name: 'Events',
     type: 'scatter',
     mode: 'markers',
-    marker: { color: 'green', symbol: 'circle', size: 12, line: { color: 'black', width: 1 } },
+    marker: { color: 'green', symbol: 'circle', size: 10, line: { color: 'black', width: 1 } },
     hovertemplate: 'Event: %{text}<br>Elapsed: %{customdata}<extra></extra>',
     yref: 'paper',
     showlegend: false
   };
   const memData = memTraces.concat([memTpsTrace]);
   memData.push(memEventsTrace);
+  // Build vertical line shapes for memory events
+  const memShapes: any[] = [];
+  for (let i = 0; i < elapsedSec.length; i++) {
+    if (!eventsPerTime[i]) continue;
+    memShapes.push({
+      type: 'line',
+      x0: elapsedSec[i],
+      x1: elapsedSec[i],
+      y0: 0,
+      y1: 1,
+      xref: 'x',
+      yref: 'paper',
+      line: { color: 'green', width: 3, dash: 'dot' },
+      opacity: 0.9
+    });
+  }
   const memLayout = {
     title: 'Memory Metrics - ' + filePath.split('/').pop(),
     // stacked area, no barmode
     hovermode: 'closest',
+    shapes: memShapes,
     legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: -0.2 },
     xaxis: {
       title: 'Elapsed',
