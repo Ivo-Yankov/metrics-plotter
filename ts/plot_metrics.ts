@@ -3,6 +3,111 @@
 
 declare const Plotly: any;
 
+/**
+ * Group raw JSON data into groups by matching podName substrings.
+ * Pods whose podName contains one of the provided group strings are summed into that group.
+ * Pods that don't match any provided group are placed into the 'other' group.
+ *
+ * Returns an object with keysMs (sorted timestamps), groupNames (input groups + 'other'),
+ * groupedCpuSeries and groupedMemSeries (maps of groupName -> number[] aligned with keysMs).
+ */
+function groupJsonData(raw: any, groups: string[]) {
+  // produce a deep copy of the raw object so we don't mutate the original
+  const out = JSON.parse(JSON.stringify(raw || {}));
+
+  // normalized group list and ensure 'other' exists
+  const groupList = (groups || []).slice();
+  if (!groupList.includes('other')) groupList.push('other');
+
+  // iterate timestamps
+  const keys = Object.keys(out).sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+  for (const k of keys) {
+    const entry = out[k];
+    if (!entry || typeof entry !== 'object') continue;
+
+    const clusterMetrics = entry.clusterMetrics || [];
+    const clusters = Array.isArray(clusterMetrics) ? clusterMetrics : [clusterMetrics];
+
+    // process each cluster separately
+    for (const cluster of clusters) {
+      if (!cluster || typeof cluster !== 'object') continue;
+
+      const pm = cluster.podMetrics;
+      // accumulator map group -> { cpu, mem }
+      const accum: Record<string, { cpu: number; mem: number }> = {};
+      for (const g of groupList) accum[g] = { cpu: 0, mem: 0 };
+
+      if (Array.isArray(pm)) {
+        for (const pod of pm) {
+          const podName = (pod && (pod.podName || pod.name)) || '';
+          const cpu = (pod && pod.cpuInMillicores) || 0;
+          const mem = (pod && pod.memoryInMebibytes) || 0;
+          let matched = false;
+          for (const g of groups) {
+            if (!g) continue;
+            if (podName.indexOf(g) !== -1) {
+              accum[g].cpu += cpu;
+              accum[g].mem += mem;
+              matched = true;
+              break;
+            }
+          }
+          if (!matched) {
+            accum['other'].cpu += cpu;
+            accum['other'].mem += mem;
+          }
+        }
+      } else if (pm && typeof pm === 'object') {
+        for (const podName of Object.keys(pm)) {
+          const metrics = (pm as any)[podName] || {};
+          const cpu = metrics.cpuInMillicores || 0;
+          const mem = metrics.memoryInMebibytes || 0;
+          let matched = false;
+          for (const g of groups) {
+            if (!g) continue;
+            if (podName.indexOf(g) !== -1) {
+              accum[g].cpu += cpu;
+              accum[g].mem += mem;
+              matched = true;
+              break;
+            }
+          }
+          if (!matched) {
+            accum['other'].cpu += cpu;
+            accum['other'].mem += mem;
+          }
+        }
+      }
+
+      // Build new grouped podMetrics array - include groups that have non-zero totals
+      const groupedPods: any[] = [];
+      for (const g of groupList) {
+        const totals = accum[g];
+        if (!totals) continue;
+        // include group if there is any usage recorded (or always include 'other' to show absence)
+        if (totals.cpu !== 0 || totals.mem !== 0 || g === 'other') {
+          groupedPods.push({
+            namespace: 'grouped',
+            podName: g,
+            cpuInMillicores: totals.cpu,
+            memoryInMebibytes: totals.mem
+          });
+        }
+      }
+
+      // replace cluster.podMetrics with groupedPods
+      cluster.podMetrics = groupedPods;
+    }
+
+    // if original clusterMetrics was not an array, preserve that shape
+    if (!Array.isArray(entry.clusterMetrics) && entry.clusterMetrics) {
+      entry.clusterMetrics = Array.isArray(entry.clusterMetrics) ? entry.clusterMetrics : entry.clusterMetrics;
+    }
+  }
+
+  return out;
+}
+
 async function loadJson(path: string): Promise<any> {
   const res = await fetch(path);
   if (!res.ok) throw new Error(`Failed to load ${path}: ${res.statusText}`);
@@ -218,8 +323,11 @@ function attachHoverHandlers(divId: string) {
   });
 }
 
-async function render(filePath: string, divCpu: string, divMem: string) {
-  const raw = await loadJson(filePath);
+async function render(filePath: string, divCpu: string, divMem: string, dataGroups: string[] = []) {
+  let raw = await loadJson(filePath);
+  if (dataGroups.length) {
+    raw = groupJsonData(raw, dataGroups);
+  }
   const parsed = parseData(raw);
   createPlots(parsed, filePath, divCpu, divMem);
 }
@@ -390,25 +498,44 @@ function createPlots(parsed: any, filePath: string, divCpu: string, divMem: stri
   attachHoverHandlers(divMem);
 }
 
-function renderFromObject(obj: any, divCpu: string, divMem: string) {
-  const parsed = parseData(obj);
+function renderFromObject(obj: any, divCpu: string, divMem: string, dataGroups: string[] = []) {
+  let copiedObj = JSON.parse(JSON.stringify(obj));
+  if (dataGroups.length) {
+    copiedObj = groupJsonData(copiedObj, dataGroups);
+  }
+
+  const parsed = parseData(copiedObj);
+
   createPlots(parsed, 'uploaded-file.json', divCpu, divMem);
 }
 
 // Expose a global boot function for the HTML page
 (window as any).renderMetrics = render;
 (window as any).renderMetricsFromObject = renderFromObject;
+(window as any).dataGroups = [
+  'network-node',
+  'mirror',
+  'relay',
+  'explorer',
+  'block-node'
+];
 
-// If loaded directly, auto-run with example data
-if (typeof window !== 'undefined') {
+function loadDefaultCharts() {
   // use absolute path so fetching works from /ts/index.html
   const defaultFile = window.location.search ? (new URLSearchParams(window.location.search).get('file') || '/data/test-events.json') : '/data/test-events.json';
   // delay to allow Plotly to be loaded via CDN
   window.addEventListener('load', () => {
     try {
-      (window as any).renderMetrics(defaultFile, 'cpuDiv', 'memDiv');
+      (window as any).renderMetrics(defaultFile, 'cpuDiv', 'memDiv', (window as any).toggleGrouping.grouped ? (window as any).dataGroups : []);
     } catch (e) {
       console.error('Failed to render:', e);
     }
   });
+}
+
+(window as any).loadDefaultCharts = loadDefaultCharts;
+
+// If loaded directly, auto-run with example data
+if (typeof window !== 'undefined') {
+  loadDefaultCharts();
 }

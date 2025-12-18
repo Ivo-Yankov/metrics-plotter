@@ -16,6 +16,7 @@
   <div id="controls">
     <label>Choose JSON file: <input id="fileInput" type="file" accept=".json" /></label>
     <button id="load">Load</button>
+    <button id="toggleGrouping">Show grouped data</button>
     <span id="status" style="margin-left:12px;color:#666"></span>
   </div>
 
@@ -29,11 +30,31 @@
     var fileInput = document.getElementById('fileInput');
     var loadBtn = document.getElementById('load');
     var status = document.getElementById('status');
+    var toggleGrouping = document.getElementById('toggleGrouping');
+    toggleGrouping.grouped = false;
+    window.toggleGrouping = toggleGrouping;
+
+    toggleGrouping.addEventListener('click', function () {
+      toggleGrouping.grouped = !toggleGrouping.grouped;
+      if (toggleGrouping.grouped) {
+        toggleGrouping.textContent = 'Show all data';
+      } else {
+        toggleGrouping.textContent = 'Show grouped data';
+      }
+
+      loadCharts();
+    });
+
     loadBtn.addEventListener('click', function () {
+      loadCharts();
+    });
+
+    function loadCharts() {
       status.textContent = '';
       var files = fileInput.files;
       if (!files || files.length === 0) {
-        status.textContent = 'No file selected';
+        status.textContent = 'No file selected, showing example data';
+        window.dispatchEvent(new Event('load'));
         return;
       }
       var file = files[0];
@@ -42,14 +63,19 @@
         try {
           var text = ev.target.result;
           var obj = JSON.parse(text);
+          var dataGroups = [];
+          if (toggleGrouping.grouped) {
+            dataGroups = window.dataGroups;
+          }
+
           // call the function exposed by the bundle to render from an object
           if (window.renderMetricsFromObject) {
-            window.renderMetricsFromObject(obj, 'cpuDiv', 'memDiv');
+            window.renderMetricsFromObject(obj, 'cpuDiv', 'memDiv', dataGroups);
           } else if (window.renderMetrics) {
             // fallback: write file to a Blob URL and let render fetch it
             var blob = new Blob([text], { type: 'application/json' });
             var url = URL.createObjectURL(blob);
-            window.renderMetrics(url, 'cpuDiv', 'memDiv');
+            window.renderMetrics(url, 'cpuDiv', 'memDiv', dataGroups);
           } else {
             console.error('No render function available on window');
             status.textContent = 'Render function not available';
@@ -66,7 +92,7 @@
         status.textContent = 'Failed to read file';
       };
       reader.readAsText(file);
-    });
+    }
 
     // allow pressing Enter on the file input to trigger load
     fileInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') loadBtn.click(); });
