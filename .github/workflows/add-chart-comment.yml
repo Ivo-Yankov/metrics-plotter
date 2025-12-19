@@ -14,10 +14,6 @@ jobs:
     steps:
       - name: Checkout repository (PR head)
         uses: actions/checkout@v4
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
