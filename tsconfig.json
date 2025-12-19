@@ -10,6 +10,8 @@
     "moduleResolution": "node",
     "outDir": "dist"
   },
-  "include": ["ts/**/*", "ts/*", "*.ts"]
+  "include": [
+    "src/**/*",
+    "src/*", "*.ts"]
 }
 

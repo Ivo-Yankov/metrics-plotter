@@ -2,6 +2,5 @@
 .venv/
 charts/
 data/
-__pycache__/
-*.pyc
-
+static/
+node_modules/

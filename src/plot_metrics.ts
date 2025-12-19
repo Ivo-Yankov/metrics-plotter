@@ -1,5 +1,5 @@
 // TypeScript file for plotting metrics with Plotly in the browser.
-// Build with: npm run build (uses esbuild) and open ts/index.html in a browser-served folder.
+// Build with: npm run build (uses esbuild) and open src/index.html in a browser-served folder.
 
 declare const Plotly: any;
 
@@ -406,7 +406,7 @@ function createPlots(parsed: any, filePath: string, divCpu: string, divMem: stri
     });
   }
   const cpuLayout = {
-    title: 'CPU Metrics - ' + filePath.split('/').pop(),
+    title: 'CPU Metrics',
     // stacked area, no barmode
     hovermode: 'closest',
     shapes: cpuShapes,
@@ -476,7 +476,7 @@ function createPlots(parsed: any, filePath: string, divCpu: string, divMem: stri
     });
   }
   const memLayout = {
-    title: 'Memory Metrics - ' + filePath.split('/').pop(),
+    title: 'Memory Metrics',
     // stacked area, no barmode
     hovermode: 'closest',
     shapes: memShapes,
@@ -521,7 +521,7 @@ function renderFromObject(obj: any, divCpu: string, divMem: string, dataGroups: 
 ];
 
 function loadDefaultCharts() {
-  // use absolute path so fetching works from /ts/index.html
+  // use absolute path so fetching works from /src/index.html
   const defaultFile = window.location.search ? (new URLSearchParams(window.location.search).get('file') || '/data/test-events.json') : '/data/test-events.json';
   // delay to allow Plotly to be loaded via CDN
   window.addEventListener('load', () => {
