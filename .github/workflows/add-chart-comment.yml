@@ -1,18 +1,13 @@
 name: Add chart comment
 
 on:
-  pull_request_target:
-
-permissions:
-  issues: write
-  pull-requests: write
-  contents: read
+  pull_request:
 
 jobs:
   build-and-screenshot:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository (PR head)
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Node.js
@@ -44,18 +39,20 @@ jobs:
           name: screenshot
           path: charts/out.png
 
-      - name: Read screenshot and encode
-        id: read_screenshot
-        run: |
-          if [ ! -f charts/out.png ]; then echo "Screenshot not found"; exit 1; fi
-          echo "img=$(base64 -w 0 charts/out.png)" >> $GITHUB_OUTPUT
-
-      - name: Create PR comment with screenshot
-        uses: peter-evans/create-or-update-comment@v4
+      - name: Comment on PR with screenshot
+        uses: actions/github-script@v6
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          issue-number: ${{ github.event.pull_request.number }}
-          body: |
-            Screenshot from workflow:
-
-            ![screenshot](data:image/png;base64,${{ steps.read_screenshot.outputs.img }})
+          script: |
+            const fs = require('fs');
+            const path = 'charts/out.png';
+            if (!fs.existsSync(path)) {
+              throw new Error('Screenshot not found at ' + path);
+            }
+            const data = fs.readFileSync(path, { encoding: 'base64' });
+            const body = `Screenshot from workflow:\n\n![screenshot](data:image/png;base64,${data})`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body
+            });
