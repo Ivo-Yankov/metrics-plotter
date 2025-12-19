@@ -1,14 +1,23 @@
 name: Add chart comment
 
 on:
-  pull_request:
+  pull_request_target:
+
+permissions:
+  issues: write
+  pull-requests: write
+  contents: read
 
 jobs:
   build-and-screenshot:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout repository (PR head)
         uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
