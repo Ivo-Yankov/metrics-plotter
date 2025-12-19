@@ -520,13 +520,32 @@ function renderFromObject(obj: any, divCpu: string, divMem: string, dataGroups: 
   'block-node'
 ];
 
+function resolveDefaultFile(): string {
+  const params = new URLSearchParams(window.location.search);
+  const fileParam = params.get('data');
+  if (fileParam) {
+    return `./data/${fileParam}.json`;
+  }
+  return './example-data/metrics-with-events.json';
+}
+
 function loadDefaultCharts() {
-  // use absolute path so fetching works from /src/index.html
-  const defaultFile = window.location.search ? (new URLSearchParams(window.location.search).get('file') || '/data/test-events.json') : '/data/test-events.json';
-  // delay to allow Plotly to be loaded via CDN
+  // run on load after Plotly is available
   window.addEventListener('load', () => {
     try {
-      (window as any).renderMetrics(defaultFile, 'cpuDiv', 'memDiv', (window as any).toggleGrouping.grouped ? (window as any).dataGroups : []);
+      // determine default grouping from GET params: ?grouped=1|true or ?mode=grouped
+      const params = new URLSearchParams(window.location.search);
+      const groupedDefault = (params.get('grouped') || '').toLowerCase() === 'true';
+
+      // if the page has the toggle button, set its state/text before rendering
+      const tg = (window as any).toggleGrouping;
+      if (tg) {
+        tg.grouped = groupedDefault;
+        tg.textContent = groupedDefault ? 'Show all data' : 'Show grouped data';
+      }
+
+      const defaultFile = resolveDefaultFile();
+      (window as any).renderMetrics(defaultFile, 'cpuDiv', 'memDiv', (window as any).toggleGrouping && (window as any).toggleGrouping.grouped ? (window as any).dataGroups : []);
     } catch (e) {
       console.error('Failed to render:', e);
     }

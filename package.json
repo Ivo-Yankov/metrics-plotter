@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "esbuild src/plot_metrics.ts --bundle --outfile=static/bundle.js --platform=browser --minify",
-    "watch": "esbuild src/plot_metrics.ts --bundle --outfile=static/bundle.js --platform=browser --servedir=. --watch",
-    "start": "node -e \"require('child_process').execSync('npx http-server -c-1 -p 8000', {stdio:'inherit'})\""
+    "build": "esbuild src/plot_metrics.ts --bundle --outfile=src/static/bundle.js --platform=browser --minify",
+    "prestart": "test -e src/data || ln -s ../data src/data; test -e src/charts || ln -s ../charts src/charts; test -e src/example-data || ln -s ../example-data src/example-data",
+    "start": "npx http-server src -c-1 -p 8000"
   },
   "devDependencies": {
     "esbuild": "^0.18.0",
@@ -13,4 +13,3 @@
     "http-server": "^14.1.1"
   }
 }
-

@@ -26,6 +26,22 @@
   <!-- bundle.js will be generated to /static/bundle.js by the build step -->
   <script src="/static/bundle.js"></script>
   <script>
+    // hide controls when ?hide-controls=1 or ?hide-controls=true
+    (function () {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const hide = (params.get('hide-controls') || '').toLowerCase();
+        if (hide === '1' || hide === 'true') {
+          const title = document.querySelector('h1');
+          if (title) title.style.display = 'none';
+          const controls = document.getElementById('controls');
+          if (controls) controls.style.display = 'none';
+        }
+      } catch (e) {
+        // ignore
+      }
+    })();
+
     // wire up the load button to read local file using FileReader (plain JS)
     var fileInput = document.getElementById('fileInput');
     var loadBtn = document.getElementById('load');

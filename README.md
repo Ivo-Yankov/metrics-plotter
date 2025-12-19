@@ -1,21 +1,19 @@
 # metrics-plotter
 
-Simple script to plot CPU, memory and transactions-per-second from a JSON file.
+Web-based tool to plot CPU, memory and transactions-per-second from JSON performance snapshots.
 
 Prerequisites
-- Python 3.8+
-- matplotlib
+- Node.js 22+ and npm
 
-Install (optional virtualenv):
+Setup
 
-python3 -m venv .venv
-source .venv/bin/activate
-pip install matplotlib
+```
+npm install
+npm run build
+npm start
+```
 
-Run
-
-python3 plot_metrics.py <path-to-json>
-
-Example
-
-python3 plot_metrics.py data/only-pinger-60-min.json
+Usage
+- Open the app in your browser (default: http://localhost:8000/src/index.html).
+- The page auto-loads an example dataset by default. Use the "Choose JSON file" button to load your own file.
+- Use the "Show grouped data" toggle to switch between grouped and ungrouped pod metrics.
