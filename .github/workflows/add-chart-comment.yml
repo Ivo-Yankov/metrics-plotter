@@ -5,9 +5,10 @@ on:
 
 jobs:
   build-and-screenshot:
+    permissions: write-all
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout repository (PR head)
         uses: actions/checkout@v4
 
       - name: Setup Node.js
@@ -39,20 +40,37 @@ jobs:
           name: screenshot
           path: charts/out.png
 
-      - name: Comment on PR with screenshot
-        uses: actions/github-script@v6
+      - name: Commit artifacts to branch
+        env:
+          BRANCH: screenshot-artifacts
+          ART_DIR: artifacts/${{ github.run_id }}
+        run: |
+          if [ ! -f charts/out.png ]; then echo "Screenshot not found"; exit 1; fi
+          if [ ! -f example-data/metrics-with-events.json ]; then echo "Example JSON not found"; exit 1; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # fetch latest refs and create/update the branch
+          git fetch origin
+          git checkout --orphan $BRANCH || git checkout $BRANCH || true
+          # ensure a clean branch state
+          git rm -rf . || true
+          mkdir -p "$ART_DIR"
+          cp charts/out.png "$ART_DIR/out.png"
+          cp example-data/metrics-with-events.json "$ART_DIR/metrics-with-events.json"
+          git add "$ART_DIR"
+          git commit -m "Add screenshot artifacts for ${{ github.sha }}" || echo "No changes to commit"
+          # push branch (create or update)
+          git push --force --set-upstream origin $BRANCH
+
+      - name: Create PR comment with artifact links
+        uses: peter-evans/create-or-update-comment@v4
         with:
-          script: |
-            const fs = require('fs');
-            const path = 'charts/out.png';
-            if (!fs.existsSync(path)) {
-              throw new Error('Screenshot not found at ' + path);
-            }
-            const data = fs.readFileSync(path, { encoding: 'base64' });
-            const body = `Screenshot from workflow:\n\n![screenshot](data:image/png;base64,${data})`;
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.payload.pull_request.number,
-              body
-            });
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            Screenshot artifacts for this run are available in the repository branch `screenshot-artifacts`:
+
+            - Screenshot image: https://raw.githubusercontent.com/${{ github.repository_owner }}/${{ github.event.repository.name }}/screenshot-artifacts/artifacts/${{ github.run_id }}/out.png
+            - Example JSON: https://raw.githubusercontent.com/${{ github.repository_owner }}/${{ github.event.repository.name }}/screenshot-artifacts/artifacts/${{ github.run_id }}/metrics-with-events.json
+
+            ![screenshot](https://raw.githubusercontent.com/${{ github.repository_owner }}/${{ github.event.repository.name }}/screenshot-artifacts/artifacts/${{ github.run_id }}/out.png)
