@@ -121,7 +121,8 @@ function parseData(data: any) {
 
   // collect events per timestamp (join multiple events into a single string or empty)
   const eventsPerTime: string[] = keysMs.map(k => {
-    const ev = (data[String(k)] && data[String(k)].events) || [];
+    const entry = data[String(k)] || {};
+    const ev = entry.events || [];
     if (!Array.isArray(ev)) return '';
     return ev.length ? ev.join('; ') : '';
   });
@@ -405,14 +406,42 @@ function createPlots(parsed: any, filePath: string, divCpu: string, divMem: stri
       opacity: 0.9
     });
   }
+
+  // build annotations (visible labels) for CPU events
+  // helper to build a Plotly annotation for an event marker (defaults to top-of-chart, no angle)
+  function buildEventAnnotation(x: number, text: string, yPaper: number = 1.06) {
+    // place the annotation just above the plotting area (paper coords > 1)
+    const a: any = {
+      x: x,
+      y: yPaper,
+      xref: 'x',
+      yref: 'paper',
+      text: text,
+      font: { size: 10, color: 'green' },
+      align: 'center',
+      showarrow: false,
+    };
+    return a;
+  }
+
+  const cpuAnnotations: any[] = [];
+  for (let i = 0; i < elapsedSec.length; i++) {
+    const ev = eventsPerTime[i];
+    if (!ev) continue;
+    // pick the first event and truncate for brevity in-chart; full text remains on hover of the marker
+    const first = (ev.split(';')[0] || '').trim();
+    const shortLabel = first.length > 40 ? first.slice(0, 40) + '…' : first + (ev.indexOf(';') !== -1 ? '…' : '');
+    // place at the top of the chart with no angle
+    cpuAnnotations.push(buildEventAnnotation(elapsedSec[i], shortLabel));
+  }
   const cpuLayout = {
     title: 'CPU Metrics',
     // stacked area, no barmode
     hovermode: 'closest',
     shapes: cpuShapes,
+    annotations: cpuAnnotations,
     legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: -0.2 },
     xaxis: {
-      title: 'Elapsed',
       type: 'linear',
       tickvals: tickVals,
       ticktext: tickText,
@@ -421,7 +450,7 @@ function createPlots(parsed: any, filePath: string, divCpu: string, divMem: stri
     },
     yaxis: { title: 'CPU (millicores)' },
     yaxis2: { title: 'Transactions/sec', overlaying: 'y', side: 'right' },
-    margin: { t: 50, b: 120 }
+    margin: { t: 70, b: 140 }
   };
 
   Plotly.newPlot(divCpu, cpuData, cpuLayout, {responsive: true});
@@ -475,14 +504,25 @@ function createPlots(parsed: any, filePath: string, divCpu: string, divMem: stri
       opacity: 0.9
     });
   }
+
+  // build annotations (visible labels) for Memory events
+  const memAnnotations: any[] = [];
+  for (let i = 0; i < elapsedSec.length; i++) {
+    const ev = eventsPerTime[i];
+    if (!ev) continue;
+    const first = (ev.split(';')[0] || '').trim();
+    const shortLabel = first.length > 40 ? first.slice(0, 40) + '…' : first + (ev.indexOf(';') !== -1 ? '…' : '');
+    // place under the chart and angle the label
+    memAnnotations.push(buildEventAnnotation(elapsedSec[i], shortLabel));
+  }
   const memLayout = {
     title: 'Memory Metrics',
     // stacked area, no barmode
     hovermode: 'closest',
     shapes: memShapes,
+    annotations: memAnnotations,
     legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: -0.2 },
     xaxis: {
-      title: 'Elapsed',
       type: 'linear',
       tickvals: tickVals,
       ticktext: tickText,
@@ -491,7 +531,7 @@ function createPlots(parsed: any, filePath: string, divCpu: string, divMem: stri
     },
     yaxis: { title: 'Memory (MiB)' },
     yaxis2: { title: 'Transactions/sec', overlaying: 'y', side: 'right' },
-    margin: { t: 50, b: 120 }
+    margin: { t: 70, b: 140 }
   };
 
   Plotly.newPlot(divMem, memData, memLayout, {responsive: true});
